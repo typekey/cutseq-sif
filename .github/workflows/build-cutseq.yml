@@ -1,17 +1,19 @@
-# Build the cutseq image and push it to GHCR.
+# Build the cutseq image, push it to GHCR, and publish a Singularity .sif
+# as a GitHub Release asset.
 #
-# No secrets to configure: GITHUB_TOKEN is provided automatically and
-# `packages: write` is all the permission pushing to ghcr.io needs.
+# No secrets to configure: GITHUB_TOKEN is provided automatically;
+# `packages: write` covers ghcr.io and `contents: write` covers the release.
 #
-# AFTER THE FIRST SUCCESSFUL RUN, make the package public once:
-#   https://github.com/users/typekey/packages/container/cutseq/settings
-#   -> Danger Zone -> Change visibility -> Public
-# Otherwise Singularity on the cluster cannot pull it anonymously.
+# Produces:
+#   ghcr.io/typekey/cutseq:0.0.68            (also :0.0.68-ca5.2 and :latest)
+#   Release v0.0.68  ->  cutseq_0.0.68.sif
 #
-# Resulting image:
-#   ghcr.io/typekey/cutseq:0.0.68   and   :latest
-# Pull from Singularity with:
+# Pull either way:
 #   singularity pull docker://ghcr.io/typekey/cutseq:0.0.68
+#   wget https://github.com/typekey/cutseq-sif/releases/download/v0.0.68/cutseq_0.0.68.sif
+#
+# The .sif is the better route for clusters whose compute nodes have no
+# outbound internet: download it once, point the pipeline at the file.
 
 name: build cutseq container
 
@@ -26,14 +28,16 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: typekey/cutseq
+  # Keep in step with the ARG defaults in the Dockerfile.
   CUTSEQ_VERSION: 0.0.68
+  CUTADAPT_VERSION: '5.2'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      packages: write
+      contents: write      # create the release and upload the .sif
+      packages: write      # push to ghcr.io
 
     steps:
       - uses: actions/checkout@v4
@@ -54,11 +58,15 @@ jobs:
           file: ./Dockerfile
           push: true
           # linux/amd64 only: the cutadapt manylinux wheels this image relies
-          # on are x86_64, and the cluster is x86_64. Adding linux/arm64 would
-          # force a source build and needs build-essential in the Dockerfile.
+          # on are x86_64, and the target cluster is x86_64. Adding linux/arm64
+          # would force a source build and needs build-essential in the image.
           platforms: linux/amd64
+          build-args: |
+            CUTSEQ_VERSION=${{ env.CUTSEQ_VERSION }}
+            CUTADAPT_VERSION=${{ env.CUTADAPT_VERSION }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CUTSEQ_VERSION }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CUTSEQ_VERSION }}-ca${{ env.CUTADAPT_VERSION }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -67,6 +75,48 @@ jobs:
         run: |
           IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CUTSEQ_VERSION }}
           docker run --rm "$IMG" cutseq --version
+          docker run --rm "$IMG" cutadapt --version
           docker run --rm "$IMG" cutseq --list-adapters | grep '^INLINE'
           # the pipeline invokes it as a plain command, so confirm PATH resolution
           docker run --rm "$IMG" which cutseq
+
+      # ---- Singularity image ----
+
+      - name: Install Apptainer
+        uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: 1.3.6
+
+      - name: Build .sif from the pushed image
+        run: |
+          apptainer build cutseq_${{ env.CUTSEQ_VERSION }}.sif \
+            docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CUTSEQ_VERSION }}-ca${{ env.CUTADAPT_VERSION }}
+          ls -lh cutseq_${{ env.CUTSEQ_VERSION }}.sif
+
+      - name: Smoke-test the .sif
+        run: |
+          SIF=cutseq_${{ env.CUTSEQ_VERSION }}.sif
+          apptainer exec "$SIF" cutseq --version
+          apptainer exec "$SIF" cutadapt --version
+          apptainer exec "$SIF" cutseq --list-adapters | grep '^INLINE'
+
+      - name: Publish the .sif as a release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.CUTSEQ_VERSION }}
+          name: cutseq ${{ env.CUTSEQ_VERSION }}
+          body: |
+            Container image for cutseq ${{ env.CUTSEQ_VERSION }} (cutadapt ${{ env.CUTADAPT_VERSION }}).
+
+            **Registry**
+            ```
+            singularity pull docker://ghcr.io/typekey/cutseq:${{ env.CUTSEQ_VERSION }}
+            ```
+
+            **Direct .sif** (for clusters with no outbound internet on compute nodes)
+            ```
+            wget https://github.com/typekey/cutseq-sif/releases/download/v${{ env.CUTSEQ_VERSION }}/cutseq_${{ env.CUTSEQ_VERSION }}.sif
+            ./cutseq_${{ env.CUTSEQ_VERSION }}.sif cutseq --version
+            ```
+          files: cutseq_${{ env.CUTSEQ_VERSION }}.sif
+          fail_on_unmatched_files: true

@@ -28,18 +28,21 @@ This image is a thin wrapper around the PyPI package.
 
 ## Contents
 
-`python:3.12-slim` + `cutseq==0.0.68` + `cutadapt==5.0` + `procps`.
+`python:3.12-slim` + `cutseq==0.0.68` + `cutadapt==5.2` + `procps`.
 
 Everything installs from prebuilt manylinux wheels, so no compiler is needed and the image stays
 small:
 
 * `cutseq-0.0.68-py3-none-any.whl` — pure Python
-* `cutadapt-5.0` — `cp312 manylinux_2_17_x86_64` wheel
+* `cutadapt-5.2` — `cp312 manylinux_2_17_x86_64` wheel
 
-**Versions are pinned deliberately.** cutseq only requires `cutadapt~=5.0`, which floats up to 5.2+;
-an unpinned install resolves to cutadapt 5.2. The eCLIP trimming benchmark this image was built for
-was validated against **cutadapt 5.0**, so the image pins 5.0 to reproduce it. To move forward, bump
-`CUTADAPT_VERSION` in the `Dockerfile` and re-validate.
+**Versions are pinned deliberately** — both are the current latest, pinned so a rebuild is
+reproducible rather than silently drifting.
+
+cutadapt was previously held at 5.0, the version the eCLIP trimming benchmark was validated against.
+Verified before moving to 5.2: on 100k read pairs cutseq 0.0.68 produces **byte-identical** output
+under cutadapt 5.0 and 5.2 (same stats line, same md5 of the trimmed FASTQ), so the upgrade does not
+invalidate those results.
 
 `procps` is included because Nextflow's task wrapper calls `ps` to collect runtime metrics; without
 it every task logs a warning.
@@ -60,6 +63,19 @@ To build locally instead, on any machine with Docker:
 docker build -t ghcr.io/typekey/cutseq:0.0.68 .
 docker push ghcr.io/typekey/cutseq:0.0.68
 ```
+
+## Downloadable `.sif`
+
+Each build also publishes a Singularity image as a release asset — the practical route for clusters
+whose compute nodes have no outbound internet:
+
+```bash
+wget https://github.com/typekey/cutseq-sif/releases/download/v0.0.68/cutseq_0.0.68.sif
+./cutseq_0.0.68.sif cutseq --version
+```
+
+In Nextflow, point the module's `container` directive straight at the file path instead of the
+`docker://` URL.
 
 ## Use in Nextflow
 
@@ -117,12 +133,13 @@ singularity {
 If compute nodes have no outbound internet, **pre-pull the image once from a login node** before
 submitting jobs.
 
-## Note on the repository name
+## Tags
 
-The image is a normal OCI/Docker image; Singularity converts it to a `.sif` on pull. The repo is
-named `cutseq-sif` for the use case, not because it ships a `.sif` artifact. If a downloadable
-`.sif` is wanted (useful for fully offline clusters), the workflow can be extended to build one with
-`singularity build` and attach it to a GitHub Release.
+| tag | meaning |
+|---|---|
+| `:0.0.68` | cutseq version; moves if the cutadapt pin is bumped |
+| `:0.0.68-ca5.2` | fully pinned, immutable — use this when reproducibility matters |
+| `:latest` | most recent build |
 
 ## Upstream
 

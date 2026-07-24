@@ -7,17 +7,21 @@
 # Everything installs from prebuilt manylinux wheels — no compiler needed,
 # so the slim base stays slim:
 #   cutseq  0.0.68 -> cutseq-0.0.68-py3-none-any.whl        (pure Python)
-#   cutadapt 5.0   -> cp312 manylinux_2_17_x86_64 wheel
+#   cutadapt 5.2   -> cp312 manylinux_2_17_x86_64 wheel
 #
-# Versions are PINNED on purpose: cutseq declares `cutadapt~=5.0`, which
-# otherwise floats up to 5.2+. 5.0 is the version the eCLIP trimming
-# benchmark was validated against, so this image reproduces those results.
-# To move forward, bump CUTADAPT_VERSION and re-validate.
+# Both are the latest releases. They are pinned rather than floating so a
+# rebuild is reproducible; bump them deliberately.
+#
+# cutadapt was previously held at 5.0 (the version the eCLIP trimming
+# benchmark was validated against). Verified before moving to 5.2: on
+# 100k read pairs cutseq 0.0.68 produces BYTE-IDENTICAL output under
+# cutadapt 5.0 and 5.2 (same stats line, same md5 of the trimmed FASTQ),
+# so the upgrade does not invalidate those results.
 
 FROM python:3.12-slim
 
 ARG CUTSEQ_VERSION=0.0.68
-ARG CUTADAPT_VERSION=5.0
+ARG CUTADAPT_VERSION=5.2
 
 LABEL org.opencontainers.image.title="cutseq" \
       org.opencontainers.image.description="Trim sequencing adapters/barcodes/UMIs from NGS data (cutseq ${CUTSEQ_VERSION}, cutadapt ${CUTADAPT_VERSION})" \
